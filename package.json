@@ -30,7 +30,7 @@
   "main": "app.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
+    "start": "node app.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
