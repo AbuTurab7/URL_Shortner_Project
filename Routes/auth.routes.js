@@ -41,30 +41,31 @@ authRouter.route("/resend-verification-link").post(postResendVerificationLink);
 
 authRouter.route("/verify-email-token").get(getVerifyEmailToken);
 
-const avatarStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "public/uploads/avatar");
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${Date.now()}_${Math.random()}${ext}`);
+cloudinary.config({
+  cloud_name: env.CLOUDINARY_CLOUD_NAME,
+  api_key: env.CLOUDINARY_API_KEY,
+  api_secret: env.CLOUDINARY_API_SECRET,
+});
+
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "avatars",
+    allowed_formats: ["jpg", "jpeg", "png", "gif"],
+    public_id: (req, file) => `${Date.now()}_${Math.round(Math.random() * 1e9)}`,
   },
 });
 
-const avatarFileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith("image/")) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only image files are allowed!"), false);
-  }
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) cb(null, true);
+  else cb(new Error("Only image files are allowed"), false);
 };
 
-const avatarUpload = multer({
-  storage: avatarStorage,
-  fileFilter: avatarFileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5mb
+export const avatarUpload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
-
 authRouter.route("/edit-profile").get(getEditProfile).post( avatarUpload.single("avatar"), postEditProfile);
 
 authRouter.route("/change-password").get(getChangePassword).post(postChangePassword);

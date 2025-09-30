@@ -1,10 +1,13 @@
-import { defineConfig } from 'drizzle-kit';
+import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
-  out: './drizzle',
-  schema: './drizzle/schema.js',
-  dialect: 'mysql',
+  schema: "./drizzle/schema.js",
+  out: "./drizzle/migrations",
+
+  // 👇 must be one of: 'postgresql' | 'mysql' | 'sqlite' | ...
+  dialect: "postgresql",  
+
   dbCredentials: {
-    url: process.env.DATABASE_URL,
+    url: process.env.DATABASE_URL,  // 👈 works with Railway Postgres
   },
 });
