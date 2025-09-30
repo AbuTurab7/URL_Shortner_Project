@@ -16,7 +16,7 @@ const staticPath = join(import.meta.dirname, "public");
 app.use(express.static(staticPath));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(session({secret : "my-secret-key" , resave : true ,  saveUninitialized : false}));
+app.use(session({secret : process.env.SESSION_SECRET , resave : true ,  saveUninitialized : false}));
 app.use(flash());
 app.use(requestIp.mw());
 app.use(verifyAuthentication);
