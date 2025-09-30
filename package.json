@@ -1,0 +1,44 @@
+{
+  "dependencies": {
+    "arctic": "^3.7.0",
+    "argon2": "^0.44.0",
+    "bcrypt": "^6.0.0",
+    "connect-flash": "^0.1.1",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.1",
+    "drizzle-orm": "^0.44.5",
+    "drizzle-seed": "^0.3.1",
+    "ejs": "^3.1.10",
+    "express": "^5.0.0",
+    "express-session": "^1.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "mjml": "^4.16.1",
+    "mongodb": "^6.18.0",
+    "mongoose": "^8.18.0",
+    "multer": "^2.0.2",
+    "mysql2": "^3.14.3",
+    "nodemailer": "^7.0.6",
+    "request-ip": "^3.3.0",
+    "resend": "^6.1.0",
+    "zod": "^4.1.1"
+  },
+  "name": "url_shortner",
+  "version": "1.0.0",
+  "main": "app.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file=.env --watch app.js ",
+    "start": "node --env-file=.env app.js ",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "node --env-file=.env drizzle/seed.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "drizzle-kit": "^0.31.4"
+  }
+}

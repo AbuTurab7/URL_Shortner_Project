@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/style.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css"
+    />
+
+    <title>URL Shortener</title>
+  </head>
+  <body>
+    <%- include("./partials/navbar"); %>
+
+    <main class="main-container">
+      <div class="container">
+        <section class="hero">
+          <h1>🔗 URL Shortener</h1>
+          <% if(success || success.length >= 0) { %> <%
+          success.forEach((success) => { %>
+          <p class="flash-success"><%= success %></p>
+          <% })} %>
+        </section>
+
+        <section class="form-card">
+          <form action="/shorten" method="POST" class="shorten-form">
+            <div class="form-group">
+              <label for="url">Enter URL</label>
+              <input
+                type="url"
+                name="url"
+                id="url"
+                required
+                placeholder="https://www.youtube.com"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="shortCode">Custom Short Code</label>
+              <input
+                type="text"
+                name="shortCode"
+                id="shortCode"
+                required
+                placeholder="youtube123"
+              />
+            </div>
+
+            <button id="shortenBtn" type="submit" class="btn-primary">
+              🚀 Shorten
+            </button>
+          </form>
+          <% if(errors || errors.length >= 0) { %> <% errors.forEach((error) =>
+          { %>
+          <p class="flash-error"><%= error %></p>
+          <% });} %>
+        </section>
+
+        <section class="links-card">
+          <h2>📌 Recent Shortened URLs</h2>
+
+          <ul id="shortened_urls" class="links-list">
+            <% Links.map(({shortCode, url , id}) => { %> <% const newURL =
+            url.length >= 40 ? url.slice(0, 40) + "..." : url; %>
+            <li class="link-item">
+              <a href="/<%= shortCode %>" target="_blank">
+                <%= host %>/<%= shortCode %>
+              </a>
+
+              <div class="link-actions">
+                <span class="full-url" title="<%= url %>"><%= newURL %></span>
+
+                <i
+                  class="fa fa-clone"
+                  id="copy-btn"
+                  data-url="<%= host %>/<%= shortCode %>"
+                  aria-hidden="true"
+                ></i>
+
+                <a href="/edit/<%= id %>">
+                  <i class="fa fa-pencil" aria-hidden="true"></i>
+                </a>
+
+                <form action="/delete/<%= id %>" method="post">
+                  <button id="delete-btn">
+                    <i class="fa fa-trash" aria-hidden="true"></i>
+                  </button>
+                </form>
+              </div>
+            </li>
+            <% }) %>
+          </ul>
+        </section>
+        <% if(totalPage > 1 ) { %>
+        <div class="pagination">
+          <% if(currentPage > 1 ) { %>
+          <a href="?page=<%= currentPage - 1 %>">
+            <button>Prev</button>
+          </a>
+          <% } %>
+
+         <% let sp = Math.max(1 , currentPage - 2); %>
+         <% let ep = Math.min(totalPage , currentPage + 2); %>
+
+        <% if( sp > 1){ %>
+          <a href="?page=1">
+            <span>1</span>
+          </a>
+         <% if(sp > 2) { %>
+          <p>...</p>
+        <% } %>
+        <% } %>
+
+        <% for(let i = sp ; i <= ep ; i++){ %>
+         <% if(i === currentPage){ %>
+            <span id="activePage"><%= i %></span>
+          <% } else { %>
+            <a href="?page=<%=i %>">
+            <span><%= i %></span>
+          </a>
+         <% } %>
+         <% } %>
+
+         <% if(ep < totalPage){ %>
+        <%  if(ep < totalPage - 1){ %>
+            <p>...</p>
+         <% } %>
+          <a href="?page=<%= totalPage %>">
+            <span><%= totalPage %></span>
+          </a>
+        <% } %>
+          <% } %> 
+
+           <% if(currentPage < totalPage ) { %>
+          <a href="?page=<%= currentPage + 1 %>">
+            <button>Next</button>
+          </a>
+          
+
+        </div>
+        <% } %>
+      </div>
+    </main>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const copyButtons = document.querySelectorAll("#copy-btn");
+
+        copyButtons.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const url = btn.getAttribute("data-url");
+            navigator.clipboard
+              .writeText(url)
+              .then(() => alert("Copied successfully!"))
+              .catch((err) => {
+                alert("Failed to copy: " + err);
+              });
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
