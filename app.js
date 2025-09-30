@@ -28,7 +28,7 @@ app.use(authRouter);
 app.use(router);
 
 
-const PORT = env.PORT;
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`Server is running on PORT :${PORT}`);
 });
