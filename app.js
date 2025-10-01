@@ -9,6 +9,14 @@ import flash from "connect-flash";
 import session from "express-session";
 import requestIp from "request-ip"
 
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection:", reason);
+});
+
 const app = express();
 app.set("view engine" , "ejs");
 const staticPath = join(import.meta.dirname, "public");
