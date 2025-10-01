@@ -1,7 +1,7 @@
 import express from "express";
 import { join } from "path";
 import router from "./Routes/shortner.routes.js";
-import {env} from "./config/env.js"
+// import {env} from "./config/env.js"
 import authRouter from "./Routes/auth.routes.js";
 import cookieParser from "cookie-parser";
 import { verifyAuthentication } from "./middlewares/verify-auth-middleware.js";
@@ -28,7 +28,7 @@ app.use(authRouter);
 app.use(router);
 
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Server is running on PORT :${PORT}`);
 });
