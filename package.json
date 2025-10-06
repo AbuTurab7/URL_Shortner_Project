@@ -30,11 +30,13 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file=.env --watch app.js ",
-    "start": "node --env-file=.env app.js ",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "node --env-file=.env drizzle/seed.js"
+    "db:seed": "node --env-file=.env drizzle/seed.js",
+    "build": "npm install",
+  "migrate": "drizzle-kit migrate",
+  "start": "npm run migrate && node app.js"
   },
   "keywords": [],
   "author": "",
