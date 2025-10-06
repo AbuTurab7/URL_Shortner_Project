@@ -1,104 +1,110 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
-  int,
-  mysqlTable,
+  integer,
+  serial,
   timestamp,
   varchar,
   text,
-  mysqlEnum,
-} from "drizzle-orm/mysql-core";
+  pgEnum,
+  pgTable,
+} from "drizzle-orm/pg-core";
 
-//shortLinksTable
-export const shortLinksTable = mysqlTable("short_link", {
-  id: int().autoincrement().primaryKey(),
-  url: varchar({ length: 255 }).notNull(),
+// ----------------- USERS -----------------
+export const usersTable = pgTable("users", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  password: varchar("password", { length: 255 }),
+  avatarUrl: text("avatar_url"),
+  isEmailValid: boolean("is_email_valid").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(), // update in code
+});
+
+// ----------------- SHORT LINKS -----------------
+export const shortLinksTable = pgTable("short_link", {
+  id: serial("id").primaryKey(),
+  url: varchar("url", { length: 255 }).notNull(),
   shortCode: varchar("short_code", { length: 20 }).notNull().unique(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-  userId: int("user_id")
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  userId: integer("user_id")
     .notNull()
     .references(() => usersTable.id),
 });
 
-//verifyEmailTokenTable
-export const verifyEmailTokensTable = mysqlTable("verify_email_tokens" , {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("user_id").notNull().references(() => usersTable.id , { onDelete: "cascade" }),
-  token: varchar({length : 8 }).notNull(),
-  expiresAt: timestamp("expires_at").default( sql `( CURRENT_TIMESTAMP + INTERVAL 1 DAY )`).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-})
-
-
-//sessionTable
-export const sessionsTable = mysqlTable("sessions", {
-  id: int().autoincrement().primaryKey(),
-  userId: int("user_id")
+// ----------------- VERIFY EMAIL TOKENS -----------------
+export const verifyEmailTokensTable = pgTable("verify_email_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
     .notNull()
     .references(() => usersTable.id, { onDelete: "cascade" }),
-  valid: boolean().default(true).notNull(),
+  token: varchar("token", { length: 8 }).notNull(),
+  expiresAt: timestamp("expires_at")
+    .default(sql`CURRENT_TIMESTAMP + INTERVAL '1 day'`)
+    .notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ----------------- SESSIONS -----------------
+export const sessionsTable = pgTable("sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => usersTable.id, { onDelete: "cascade" }),
+  valid: boolean("valid").default(true).notNull(),
   userAgent: text("user_agent"),
-  ip: varchar({ length: 255 }),
+  ip: varchar("ip", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-//usersTable
-export const usersTable = mysqlTable("users", {
-  id: int().autoincrement().primaryKey(),
-  name: varchar({ length: 255 }).notNull(),
-  email: varchar({ length: 255 }).notNull().unique(),
-  password: varchar({ length: 255 }),
-  avatarUrl: text("avatar_url"),
-  isEmailValid: boolean("is_email_valid").default(false).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
-
-//passwordResetTokensTable
-export const passwordResetTokensTable = mysqlTable("password_reset_tokens", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("user_id")
+// ----------------- PASSWORD RESET TOKENS -----------------
+export const passwordResetTokensTable = pgTable("password_reset_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
     .notNull()
     .references(() => usersTable.id, { onDelete: "cascade" })
     .unique(),
   tokenHash: text("token_hash").notNull(),
   expiresAt: timestamp("expires_at")
-    .default(sql`(CURRENT_TIMESTAMP + INTERVAL 1 HOUR)`)
+    .default(sql`CURRENT_TIMESTAMP + INTERVAL '1 hour'`)
     .notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-//oauthAccountsTable
-export const oauthAccountsTable = mysqlTable("oauth_accounts", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("user_id")
+// ----------------- OAUTH ACCOUNTS -----------------
+export const providerEnum = pgEnum("provider", ["google", "github"]);
+
+export const oauthAccountsTable = pgTable("oauth_accounts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
     .notNull()
     .references(() => usersTable.id, { onDelete: "cascade" }),
-  provider: mysqlEnum("provider", ["google", "github"]).notNull(),
+  provider: providerEnum("provider").notNull(),
   providerAccountId: varchar("provider_account_id", { length: 255 })
     .notNull()
     .unique(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// A user can have many short links
+// ----------------- RELATIONS -----------------
 export const usersRelation = relations(usersTable, ({ many }) => ({
   shortLink: many(shortLinksTable),
   session: many(sessionsTable),
 }));
-// A short link belongs to a user
+
 export const shortLinksRelation = relations(shortLinksTable, ({ one }) => ({
   user: one(usersTable, {
-    fields: [shortLinksTable.userId], //foreign key
+    fields: [shortLinksTable.userId],
     references: [usersTable.id],
   }),
 }));
 
 export const sessionsRelation = relations(sessionsTable, ({ one }) => ({
   user: one(usersTable, {
-    fields: [sessionsTable.userId], // foreign key
+    fields: [sessionsTable.userId],
     references: [usersTable.id],
   }),
 }));

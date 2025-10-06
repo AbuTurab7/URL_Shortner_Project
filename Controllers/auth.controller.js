@@ -1,4 +1,7 @@
-import { authenticateUser } from "../middlewares/verify-auth-middleware.js";
+// src/controllers/auth.controller.js
+import {
+  authenticateUser,
+} from "../middlewares/verify-auth-middleware.js";
 import {
   createUser,
   getUserByEmail,
@@ -32,51 +35,49 @@ import {
   verifyEmailValidation,
   verifyUserValidation,
 } from "../validation/auth-validation.js";
-// import { sendEmail } from "../lib/nodemailer.js";
 import { sendEmail } from "../lib/resendEmail.js";
 import fs from "fs/promises";
 import { join } from "path";
-import ejs, { name } from "ejs";
+import ejs from "ejs";
 import mjml2html from "mjml";
-import { success } from "zod";
-import { asc } from "drizzle-orm";
+import { asc } from "drizzle-orm"; // if unused, remove — left in case of sorting usage
 import { OAUTH_EXCHANGE_EXPIRY } from "../config/constant.js";
 import { decodeIdToken, generateCodeVerifier, generateState } from "arctic";
 import { google } from "../lib/oauth/google.js";
 import { github } from "../lib/oauth/github.js";
-import { error } from "console";
 
-//registration page
-//get
+// registration page
 export const getRegister = (req, res) => {
   return res.render("auth/register", { errors: req.flash("errors") });
 };
-//post
+
+// post register
 export const postRegister = async (req, res) => {
   const { data, error } = registrationValidation.safeParse(req.body);
 
   if (error) {
     const errors = error.issues[0].message;
     req.flash("errors", errors);
-    res.redirect("/register");
-  } else {
-    const { name, email, password } = data;
-    const [userExist] = await getUserByEmail(email);
-
-    if (userExist) {
-      req.flash("errors", "User already exists");
-      return res.redirect("/register");
-    }
-    const hashedPassword = await getHashPassword(password);
-    const [user] = await createUser({ name, email, password: hashedPassword });
-
-    await authenticateUser({ req, res, user, name, email });
+    return res.redirect("/register");
   }
-  res.redirect("/verify-email");
+
+  const { name, email, password } = data;
+  const existing = await findUserByEmail(email);
+  if (existing) {
+    req.flash("errors", "User already exists");
+    return res.redirect("/register");
+  }
+
+  const hashedPassword = await getHashPassword(password);
+  const user = await createUser({ name, email, password: hashedPassword });
+
+  // createUser now returns user object with id
+  await authenticateUser({ req, res, user, name, email });
+
+  return res.redirect("/verify-email");
 };
 
-//Login Page
-//get
+// get login page
 export const getLogin = (req, res) => {
   return res.render("auth/login", {
     errors: req.flash("errors"),
@@ -84,7 +85,7 @@ export const getLogin = (req, res) => {
   });
 };
 
-//post
+// post login
 export const postlogin = async (req, res) => {
   const { data, error } = loginValidation.safeParse(req.body);
 
@@ -92,34 +93,37 @@ export const postlogin = async (req, res) => {
     const errors = error.issues[0].message;
     req.flash("errors", errors);
     return res.redirect("/login");
-  } else {
-    const { email, password } = data;
-    const [user] = await getUserByEmail(email);
-
-    if (!user) {
-      req.flash("errors", "Invalid email or password");
-      return res.redirect("/login");
-    }
-
-    if(!user.password){
-      req.flash("errors", "You have created account using social login. Please login with your social account.");
-      return res.redirect("/login");
-    }
-
-    const isPasswordValid = await comparePassword(password, user.password);
-
-    if (!isPasswordValid) {
-      req.flash("errors", "Invalid email or password");
-      return res.redirect("/login");
-    }
-
-    await authenticateUser({ req, res, user });
   }
-  res.redirect("/");
+
+  const { email, password } = data;
+  const user = await findUserByEmail(email);
+
+  if (!user) {
+    req.flash("errors", "Invalid email or password");
+    return res.redirect("/login");
+  }
+
+  if (!user.password) {
+    req.flash(
+      "errors",
+      "You have created account using social login. Please login with your social account."
+    );
+    return res.redirect("/login");
+  }
+
+  const isPasswordValid = await comparePassword(password, user.password);
+
+  if (!isPasswordValid) {
+    req.flash("errors", "Invalid email or password");
+    return res.redirect("/login");
+  }
+
+  await authenticateUser({ req, res, user });
+
+  return res.redirect("/");
 };
 
-// Profile Page
-// get
+// profile page
 export const getProfile = async (req, res) => {
   if (!req.user) return res.send(`<h1>You are not logged in</h1>`);
 
@@ -134,40 +138,44 @@ export const getProfile = async (req, res) => {
       id: user.id,
       name: user.name,
       email: user.email,
-      avatarUrl: user.avatarUrl,
-      isEmailValid: user.isEmailValid,
+      avatarUrl: user.avatar_url ?? user.avatarUrl,
+      isEmailValid: user.is_email_valid ?? user.isEmailValid,
       hasPassword: Boolean(user.password),
-      createdAt: user.createdAt,
+      createdAt: user.created_at ?? user.createdAt,
       links: userShortLinks,
     },
     success: req.flash("success"),
   });
 };
 
-//Logout Page
-// get
+// logout
 export const getLogout = async (req, res) => {
-  await deleteCurrentSession(req.user.sessionId);
-
+  if (req.user?.sessionId) {
+    await deleteCurrentSession(req.user.sessionId);
+  } else if (req.user?.session_id) {
+    await deleteCurrentSession(req.user.session_id);
+  }
   res.clearCookie("access_token");
   res.clearCookie("refresh_token");
-  res.redirect("/");
+  return res.redirect("/");
 };
 
-//verify-email
+// verify-email
 export const getVerifyEmail = async (req, res) => {
   if (!req.user) return res.redirect("/");
   const user = await findUserById(req.user.id);
-  if (!user || user.isEmailValid) return res.redirect("/");
+  if (!user || user.is_email_valid) return res.redirect("/");
   return res.render("auth/verifyEmail", { email: user.email });
 };
 
-// resend-verification-link
+// resend verification link
 export const postResendVerificationLink = async (req, res) => {
   if (!req.user) return res.redirect("/");
   const user = await findUserById(req.user.id);
-  if (!user || user.isEmailValid) return res.redirect("/");
+  if (!user || user.is_email_valid) return res.redirect("/");
   const randomToken = generateRandomToken();
+  
+  
   await insertVerifyEmailToken({ userId: user.id, token: randomToken });
   const verifyEmailLink = await createVerifyLink({
     email: user.email,
@@ -190,10 +198,10 @@ export const postResendVerificationLink = async (req, res) => {
     subject: "verify your email",
     html: htmlOutput,
   }).catch(console.error);
-  res.redirect("/verify-email");
+  return res.redirect("/verify-email");
 };
 
-//verify-email-token
+// verify-email-token
 export const getVerifyEmailToken = async (req, res) => {
   const { data, error } = verifyEmailValidation.safeParse(req.query);
 
@@ -206,13 +214,12 @@ export const getVerifyEmailToken = async (req, res) => {
 
   await verifyUserEmailAndUpdateToken(token.email);
 
-  await clearVerifyEmailToken(token.userId);
+  await clearVerifyEmailToken(token.user_id ?? token.userId);
 
   return res.redirect("/profile");
 };
 
-//edit profile page
-//get
+// edit profile (get + post)
 export const getEditProfile = async (req, res) => {
   if (!req.user) return res.send(`<h1>You are not logged in</h1>`);
 
@@ -221,18 +228,17 @@ export const getEditProfile = async (req, res) => {
 
   return res.render("auth/editProfile", {
     user: req.user,
-    avatarUrl: user.avatarUrl,
+    avatarUrl: user.avatar_url,
     errors: req.flash("errors"),
     success: req.flash("success"),
   });
 };
-//post
+
 export const postEditProfile = async (req, res) => {
   if (!req.user) return res.send(`<h1>You are not logged in</h1>`);
 
   const { data, error } = verifyUserValidation.safeParse(req.body);
   if (error) {
-    console.log("Name Error : ", error);
     const errorMessage = error.issues[0].message;
     req.flash("errors", errorMessage);
     return res.redirect("/edit-profile");
@@ -240,13 +246,12 @@ export const postEditProfile = async (req, res) => {
 
   const fileUrl = req.file ? `uploads/avatar/${req.file.filename}` : undefined;
 
-  await updateProfile({ userId: req.user.id, name: data.name , avatarUrl: fileUrl });
-  req.flash("success", "Profile updated successfully!")
+  await updateProfile({ userId: req.user.id, name: data.name, avatarUrl: fileUrl });
+  req.flash("success", "Profile updated successfully!");
   return res.redirect("/profile");
 };
 
-//change-password
-// get
+// change password
 export const getChangePassword = async (req, res) => {
   if (!req.user) return res.send(`<h1>You are not logged in</h1>`);
   return res.render("auth/changePassword", {
@@ -254,7 +259,6 @@ export const getChangePassword = async (req, res) => {
   });
 };
 
-//post
 export const postChangePassword = async (req, res) => {
   const { data, error } = passwordVerification.safeParse(req.body);
   const user = await findUserById(req.user.id);
@@ -281,15 +285,14 @@ export const postChangePassword = async (req, res) => {
   return res.redirect("/profile");
 };
 
-//Forget Password page
-//get
+// forget password (get + post)
 export const getForgetPassword = async (req, res) => {
   return res.render("auth/forgetPassword", {
     formSubmitted: req.flash("formSubmitted")[0],
     errors: req.flash("errors"),
   });
 };
-//post
+
 export const postForgetPassword = async (req, res) => {
   const { data, error } = forgetPasswordVerification.safeParse(req.body);
 
@@ -305,33 +308,30 @@ export const postForgetPassword = async (req, res) => {
     return res.redirect("/forget-password");
   }
 
-  if (user) {
-    const forgetPasswordLink = await getForgetPasswordLink({ userId: user.id });
+  const forgetPasswordLink = await getForgetPasswordLink({ userId: user.id });
 
-    const mjmlTemplate = await fs.readFile(
-      join(import.meta.dirname, "..", "emails", "forget-password-email.mjml"),
-      "utf-8"
-    );
-    const filledTemplate = ejs.render(mjmlTemplate, {
-      name: user.name,
-      link: forgetPasswordLink,
-    });
+  const mjmlTemplate = await fs.readFile(
+    join(import.meta.dirname, "..", "emails", "forget-password-email.mjml"),
+    "utf-8"
+  );
+  const filledTemplate = ejs.render(mjmlTemplate, {
+    name: user.name,
+    link: forgetPasswordLink,
+  });
 
-    const htmlOutput = mjml2html(filledTemplate).html;
+  const htmlOutput = mjml2html(filledTemplate).html;
 
-    sendEmail({
-      to: user.email,
-      subject: "Reset your password",
-      html: htmlOutput,
-    }).catch(console.error);
+  sendEmail({
+    to: user.email,
+    subject: "Reset your password",
+    html: htmlOutput,
+  }).catch(console.error);
 
-    req.flash("formSubmitted", true);
-    return res.redirect("/forget-password");
-  }
+  req.flash("formSubmitted", true);
+  return res.redirect("/forget-password");
 };
 
-// Reset password page
-// get
+// reset password (get + post)
 export const getResetPassword = async (req, res) => {
   const { token } = req.params;
   const resetPasswordData = await getResetPasswordData(token);
@@ -343,7 +343,7 @@ export const getResetPassword = async (req, res) => {
     token,
   });
 };
-// post
+
 export const postResetPassword = async (req, res) => {
   const { token } = req.params;
   const { data, error } = resetPasswordVerification.safeParse(req.body);
@@ -358,23 +358,23 @@ export const postResetPassword = async (req, res) => {
 
   if (!resetPasswordData) return res.render("auth/wrongResetPassword");
 
-  await deleteUserTokenData(resetPasswordData.userId);
+  await deleteUserTokenData(resetPasswordData.user_id ?? resetPasswordData.userId);
 
   const hashedPassword = await getHashPassword(data.confirmPassword);
-  await updateUserPassword(resetPasswordData.userId, hashedPassword);
+  await updateUserPassword(resetPasswordData.user_id ?? resetPasswordData.userId, hashedPassword);
 
   req.flash("success", "Password changed successfully!");
   return res.redirect("/login");
 };
 
-
-export const getGoogleLogin = async (req , res) => {
-  if(req.user) return res.redirect("/");
+// Google OAuth login
+export const getGoogleLogin = async (req, res) => {
+  if (req.user) return res.redirect("/");
 
   const state = generateState();
   const codeVerifier = generateCodeVerifier();
 
-  const url = google.createAuthorizationURL(state , codeVerifier , [
+  const url = google.createAuthorizationURL(state, codeVerifier, [
     "openid",
     "profile",
     "email",
@@ -384,17 +384,15 @@ export const getGoogleLogin = async (req , res) => {
     httpOnly: true,
     secure: true,
     maxAge: OAUTH_EXCHANGE_EXPIRY,
-    sameSite: "lax"
+    sameSite: "lax",
   };
 
-  res.cookie("google_oauth_state" , state , cookieConfig);
-  res.cookie("google_code_verifier" , codeVerifier , cookieConfig);
+  res.cookie("google_oauth_state", state, cookieConfig);
+  res.cookie("google_code_verifier", codeVerifier, cookieConfig);
 
-  res.redirect(url.toString());
+  return res.redirect(url.toString());
 };
 
-
-//getGoogleLoginCallback
 export const getGoogleLoginCallback = async (req, res) => {
   const { code, state } = req.query;
 
@@ -419,7 +417,6 @@ export const getGoogleLoginCallback = async (req, res) => {
 
   let tokens;
   try {
-    // arctic will verify the code given by google with code verifier internally
     tokens = await google.validateAuthorizationCode(code, codeVerifier);
   } catch {
     req.flash(
@@ -430,7 +427,6 @@ export const getGoogleLoginCallback = async (req, res) => {
   }
 
   const claims = decodeIdToken(tokens.idToken());
-  
   const { sub: googleUserId, name, email, picture } = claims;
 
   let user = await getUserWithOauthId({
@@ -438,8 +434,7 @@ export const getGoogleLoginCallback = async (req, res) => {
     email,
   });
 
-  // if user exists but user is not linked with oauth
-  if (user && !user.providerAccountId) {
+  if (user && !user.provider_account_id) {
     await linkUserWithOauth({
       userId: user.id,
       provider: "google",
@@ -448,7 +443,6 @@ export const getGoogleLoginCallback = async (req, res) => {
     });
   }
 
-  // if user doesn't exist
   if (!user) {
     user = await createUserWithOauth({
       name,
@@ -458,13 +452,13 @@ export const getGoogleLoginCallback = async (req, res) => {
       avatarUrl: picture,
     });
   }
+
   await authenticateUser({ req, res, user, name, email });
 
-  res.redirect("/");
+  return res.redirect("/");
 };
 
-
-//getGithubLoginPage
+// Github OAuth
 export const getGithubLogin = async (req, res) => {
   if (req.user) return res.redirect("/");
 
@@ -476,16 +470,14 @@ export const getGithubLogin = async (req, res) => {
     httpOnly: true,
     secure: true,
     maxAge: OAUTH_EXCHANGE_EXPIRY,
-    sameSite: "lax", // this is such that when google redirects to our website, cookies are maintained
+    sameSite: "lax",
   };
 
   res.cookie("github_oauth_state", state, cookieConfig);
 
-  res.redirect(url.toString());
+  return res.redirect(url.toString());
 };
 
-
-// getGithubLoginCallback
 export const getGithubLoginCallback = async (req, res) => {
   const { code, state } = req.query;
   const { github_oauth_state: storedState } = req.cookies;
@@ -516,7 +508,7 @@ export const getGithubLoginCallback = async (req, res) => {
   });
   if (!githubUserResponse.ok) return handleFailedLogin();
   const githubUser = await githubUserResponse.json();
-  const { id: githubUserId, name , avatar_url} = githubUser;
+  const { id: githubUserId, name, avatar_url } = githubUser;
 
   const githubEmailResponse = await fetch(
     "https://api.github.com/user/emails",
@@ -529,7 +521,8 @@ export const getGithubLoginCallback = async (req, res) => {
   if (!githubEmailResponse.ok) return handleFailedLogin();
 
   const emails = await githubEmailResponse.json();
-  const email = emails.filter((e) => e.primary)[0].email; // In GitHub we can have multiple emails, but we only want primary email
+  const primary = emails.filter((e) => e.primary)[0];
+  const email = primary?.email;
   if (!email) return handleFailedLogin();
 
   let user = await getUserWithOauthId({
@@ -537,7 +530,7 @@ export const getGithubLoginCallback = async (req, res) => {
     email,
   });
 
-  if (user && !user.providerAccountId) {
+  if (user && !user.provider_account_id) {
     await linkUserWithOauth({
       userId: user.id,
       provider: "github",
@@ -558,25 +551,21 @@ export const getGithubLoginCallback = async (req, res) => {
 
   await authenticateUser({ req, res, user, name, email });
 
-  res.redirect("/");
+  return res.redirect("/");
 };
 
-
-// Set Password Page 
-// get
-
-export const getSetPassword = async (req , res) => {
+// set password (get + post)
+export const getSetPassword = async (req, res) => {
   if (!req.user) return res.send(`<h1>You are not logged in</h1>`);
-  return res.render("auth/setPassword" , {
-    errors: req.flash("errors")
+  return res.render("auth/setPassword", {
+    errors: req.flash("errors"),
   });
 };
 
-//post
-export const postSetPassword = async (req , res) => {
+export const postSetPassword = async (req, res) => {
   if (!req.user) return res.send(`<h1>You are not logged in</h1>`);
 
-  const { data , error } = resetPasswordVerification.safeParse(req.body);
+  const { data, error } = resetPasswordVerification.safeParse(req.body);
 
   if (error) {
     const errorMessage = error.issues[0].message;
@@ -586,14 +575,14 @@ export const postSetPassword = async (req , res) => {
 
   const user = await findUserById(req.user.id);
 
-  if(user.password){
-   req.flash("errors" , "You already have your Password, Instead Change your password");
-   return res.redirect("/set-password");
+  if (user.password) {
+    req.flash("errors", "You already have your Password, Instead Change your password");
+    return res.redirect("/set-password");
   }
 
   const hashedPassword = await getHashPassword(data.confirmPassword);
   await updateUserPassword(req.user.id, hashedPassword);
 
-  req.flash("success" , "Password set successfully!");
+  req.flash("success", "Password set successfully!");
   return res.redirect("/profile");
-}
+};

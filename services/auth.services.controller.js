@@ -1,13 +1,4 @@
-import { db } from "../config/db-client.js";
-import { and, eq, gte, lt, sql } from "drizzle-orm";
-import {
-  oauthAccountsTable,
-  passwordResetTokensTable,
-  sessionsTable,
-  usersTable,
-  verifyEmailTokensTable,
-} from "../drizzle/schema.js";
-// import bcrypt from "bcrypt";
+import { pool } from "../config/db-client.js";
 import crypto from "crypto";
 import argon2 from "argon2";
 import jwt from "jsonwebtoken";
@@ -16,34 +7,45 @@ import {
   MILLISECONDS_PER_SECOND,
   REFRESH_TOKEN_EXPIRY,
 } from "../config/constant.js";
-import { passwordVerification } from "../validation/auth-validation.js";
 
 export const getUserByEmail = async (email) => {
-  return await db.select().from(usersTable).where(eq(usersTable.email, email));
+  const { rows } = await pool.query(
+    `SELECT * FROM users WHERE email = $1`,
+    [email]
+  );
+  return rows; // matches previous behaviour returning array
+};
+
+export const findUserByEmail = async (email) => {
+  const { rows } = await pool.query(
+    `SELECT * FROM users WHERE email = $1 LIMIT 1`,
+    [email]
+  );
+  return rows[0];
 };
 
 export const createUser = async ({ name, email, password }) => {
-  return await db
-    .insert(usersTable)
-    .values({ name, email, password })
-    .$returningId();
+  const { rows } = await pool.query(
+    `INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email, is_email_valid, avatar_url, created_at`,
+    [name, email, password]
+  );
+  return rows[0]; // previously returned id array; adjust callers if needed
 };
 
 export const getHashPassword = async (password) => {
-  // return await bcrypt.hash(password , 10 );
   return await argon2.hash(password);
 };
 
 export const comparePassword = async (password, hashPassword) => {
-  // return await bcrypt.compare(password , hashPassword);
   return await argon2.verify(hashPassword, password);
 };
 
 export const updateUserPassword = async (userId, password) => {
-  return await db
-    .update(usersTable)
-    .set({ password })
-    .where(eq(usersTable.id, userId));
+  const { rows } = await pool.query(
+    `UPDATE users SET password = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+    [password, userId]
+  );
+  return rows[0];
 };
 
 export const getToken = ({ id, name, email }) => {
@@ -53,12 +55,11 @@ export const getToken = ({ id, name, email }) => {
 };
 
 export const createSession = async (userId, { ip, userAgent }) => {
-  const [session] = await db
-    .insert(sessionsTable)
-    .values({ userId, ip, userAgent })
-    .$returningId();
-
-  return session;
+  const { rows } = await pool.query(
+    `INSERT INTO sessions (user_id, ip, user_agent) VALUES ($1, $2, $3) RETURNING id, user_id, valid, created_at`,
+    [userId, ip, userAgent]
+  );
+  return rows[0];
 };
 
 export const createAccessToken = ({ id, name, email, sessionId }) => {
@@ -66,6 +67,7 @@ export const createAccessToken = ({ id, name, email, sessionId }) => {
     expiresIn: ACCESS_TOKEN_EXPIRY / MILLISECONDS_PER_SECOND,
   });
 };
+
 export const createRefreshToken = (sessionId) => {
   return jwt.sign({ sessionId }, process.env.JWT_KEY, {
     expiresIn: REFRESH_TOKEN_EXPIRY / MILLISECONDS_PER_SECOND,
@@ -77,21 +79,19 @@ export const verifyToken = (token) => {
 };
 
 export const findSessionById = async (sessionId) => {
-  const [session] = await db
-    .select()
-    .from(sessionsTable)
-    .where(eq(sessionsTable.id, sessionId));
-
-  return session;
+  const { rows } = await pool.query(
+    `SELECT * FROM sessions WHERE id = $1 LIMIT 1`,
+    [sessionId]
+  );
+  return rows[0];
 };
 
 export const findUserById = async (userId) => {
-  const [user] = await db
-    .select()
-    .from(usersTable)
-    .where(eq(usersTable.id, userId));
-
-  return user;
+  const { rows } = await pool.query(
+    `SELECT * FROM users WHERE id = $1 LIMIT 1`,
+    [userId]
+  );
+  return rows[0];
 };
 
 export const refreshTokens = async (refreshToken) => {
@@ -102,7 +102,7 @@ export const refreshTokens = async (refreshToken) => {
     if (!currentSession || !currentSession.valid) {
       throw new Error("Invalid session");
     }
-    const user = await findUserById(currentSession.userId);
+    const user = await findUserById(currentSession.user_id);
 
     if (!user) throw new Error("Invalid user");
 
@@ -110,12 +110,11 @@ export const refreshTokens = async (refreshToken) => {
       id: user.id,
       name: user.name,
       email: user.email,
-      isEmailValid: user.isEmailValid,
+      isEmailValid: user.is_email_valid,
       sessionId: currentSession.id,
     };
 
     const newAccessToken = createAccessToken(userInfo);
-
     const newRefreshToken = createRefreshToken(currentSession.id);
 
     return {
@@ -124,12 +123,13 @@ export const refreshTokens = async (refreshToken) => {
       user: userInfo,
     };
   } catch (error) {
-    console.log(error.message);
+    console.log("refreshTokens error:", error?.message ?? error);
+    throw error;
   }
 };
 
 export const deleteCurrentSession = async (sessionId) => {
-  await db.delete(sessionsTable).where(eq(sessionsTable.id, sessionId));
+  await pool.query(`DELETE FROM sessions WHERE id = $1`, [sessionId]);
 };
 
 export const generateRandomToken = (digit = 8) => {
@@ -139,24 +139,35 @@ export const generateRandomToken = (digit = 8) => {
 };
 
 export const insertVerifyEmailToken = async ({ userId, token }) => {
-  return db.transaction(async (tx) => {
-    try {
-      await tx
-        .delete(verifyEmailTokensTable)
-        .where(lt(verifyEmailTokensTable.expiresAt, sql`CURRENT_TIMESTAMP`));
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
-      await tx
-        .delete(verifyEmailTokensTable)
-        .where(eq(verifyEmailTokensTable.userId, userId));
+    // delete expired tokens
+    await client.query(
+      `DELETE FROM verify_email_tokens WHERE expires_at < now()`
+    );
 
-      await tx
-        .insert(verifyEmailTokensTable)
-        .values({ userId, token: token.toString() });
-    } catch (error) {
-      console.error("Failed to insert verification token", error);
-      throw new Error("Unable to create verification token");
-    }
-  });
+    // delete any existing token for user
+    await client.query(
+      `DELETE FROM verify_email_tokens WHERE user_id = $1`,
+      [userId]
+    );
+
+    // insert new token
+    await client.query(
+      `INSERT INTO verify_email_tokens (user_id, token) VALUES ($1, $2)`,
+      [userId, token.toString()]
+    );
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Failed to insert verification token", error);
+    throw new Error("Unable to create verification token");
+  } finally {
+    client.release();
+  }
 };
 
 export const createVerifyLink = async ({ email, token }) => {
@@ -167,48 +178,36 @@ export const createVerifyLink = async ({ email, token }) => {
 };
 
 export const findVerificationEmailToken = async ({ token, email }) => {
-  return db
-    .select({
-      userId: usersTable.id,
-      email: usersTable.email,
-      token: verifyEmailTokensTable.token,
-      expiresAt: verifyEmailTokensTable.expiresAt,
-    })
-    .from(verifyEmailTokensTable)
-    .where(
-      and(eq(verifyEmailTokensTable.token, token)),
-      eq(usersTable.email, email),
-      gte(verifyEmailTokensTable.expiresAt, sql`CURRENT_TIMESTAMP`)
-    )
-    .innerJoin(usersTable, eq(usersTable.id, verifyEmailTokensTable.userId));
+  const { rows } = await pool.query(
+    `SELECT u.id as user_id, u.email, v.token, v.expires_at
+     FROM verify_email_tokens v
+     INNER JOIN users u ON u.id = v.user_id
+     WHERE v.token = $1 AND u.email = $2 AND v.expires_at >= now()
+     LIMIT 1`,
+    [token, email]
+  );
+  return rows;
 };
 
 export const verifyUserEmailAndUpdateToken = async (email) => {
-  await db
-    .update(usersTable)
-    .set({ isEmailValid: true })
-    .where(eq(usersTable.email, email));
+  await pool.query(
+    `UPDATE users SET is_email_valid = true, updated_at = now() WHERE email = $1`,
+    [email]
+  );
 };
 
 export const clearVerifyEmailToken = async (userId) => {
-  return db
-    .delete(verifyEmailTokensTable)
-    .where(verifyEmailTokensTable.userId, userId);
+  return pool.query(
+    `DELETE FROM verify_email_tokens WHERE user_id = $1`,
+    [userId]
+  );
 };
 
 export const updateProfile = async ({ userId, name, avatarUrl }) => {
-  return db
-    .update(usersTable)
-    .set({ name, avatarUrl })
-    .where(eq(usersTable.id, userId));
-};
-
-export const findUserByEmail = async (email) => {
-  const [user] = await db
-    .select()
-    .from(usersTable)
-    .where(eq(usersTable.email, email));
-  return user;
+  return pool.query(
+    `UPDATE users SET name = $1, avatar_url = COALESCE($2, avatar_url), updated_at = now() WHERE id = $3 RETURNING *`,
+    [name, avatarUrl, userId]
+  );
 };
 
 export const getForgetPasswordLink = async ({ userId }) => {
@@ -218,11 +217,25 @@ export const getForgetPasswordLink = async ({ userId }) => {
     .update(randomToken)
     .digest("hex");
 
-  await db
-    .delete(passwordResetTokensTable)
-    .where(eq(passwordResetTokensTable.userId, userId));
-
-  await db.insert(passwordResetTokensTable).values({ userId, tokenHash });
+  // delete existing tokens for user and insert new one
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM password_reset_tokens WHERE user_id = $1`,
+      [userId]
+    );
+    await client.query(
+      `INSERT INTO password_reset_tokens (user_id, token_hash) VALUES ($1, $2)`,
+      [userId, tokenHash]
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 
   return `${process.env.FRONTEND_URL}/reset-password/${randomToken}`;
 };
@@ -230,46 +243,31 @@ export const getForgetPasswordLink = async ({ userId }) => {
 export const getResetPasswordData = async (token) => {
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-  const [data] = await db
-    .select()
-    .from(passwordResetTokensTable)
-    .where(
-      and(
-        eq(passwordResetTokensTable.tokenHash, tokenHash),
-        gte(passwordResetTokensTable.expiresAt, sql`CURRENT_TIMESTAMP`)
-      )
-    );
+  const { rows } = await pool.query(
+    `SELECT * FROM password_reset_tokens WHERE token_hash = $1 AND expires_at >= now() LIMIT 1`,
+    [tokenHash]
+  );
 
-  return data;
+  return rows[0];
 };
 
 export const deleteUserTokenData = async (userId) => {
-  await db
-    .delete(passwordResetTokensTable)
-    .where(eq(passwordResetTokensTable.userId, userId));
+  await pool.query(
+    `DELETE FROM password_reset_tokens WHERE user_id = $1`,
+    [userId]
+  );
 };
 
 export async function getUserWithOauthId({ email, provider }) {
-  const [user] = await db
-    .select({
-      id: usersTable.id,
-      name: usersTable.name,
-      email: usersTable.email,
-      isEmailValid: usersTable.isEmailValid,
-      providerAccountId: oauthAccountsTable.providerAccountId,
-      provider: oauthAccountsTable.provider,
-    })
-    .from(usersTable)
-    .where(eq(usersTable.email, email))
-    .leftJoin(
-      oauthAccountsTable,
-      and(
-        eq(oauthAccountsTable.provider, provider),
-        eq(oauthAccountsTable.userId, usersTable.id)
-      )
-    );
-
-  return user;
+  const { rows } = await pool.query(
+    `SELECT u.id, u.name, u.email, u.is_email_valid, oa.provider_account_id, oa.provider
+     FROM users u
+     LEFT JOIN oauth_accounts oa ON oa.user_id = u.id AND oa.provider = $1
+     WHERE u.email = $2
+     LIMIT 1`,
+    [provider, email]
+  );
+  return rows[0];
 }
 
 export async function linkUserWithOauth({
@@ -278,17 +276,16 @@ export async function linkUserWithOauth({
   providerAccountId,
   avatarUrl,
 }) {
-  await db.insert(oauthAccountsTable).values({
-    userId,
-    provider,
-    providerAccountId,
-  });
+  await pool.query(
+    `INSERT INTO oauth_accounts (user_id, provider, provider_account_id) VALUES ($1, $2, $3)`,
+    [userId, provider, providerAccountId]
+  );
 
   if (avatarUrl) {
-    await db
-      .update(usersTable)
-      .set({ avatarUrl })
-      .where(and(eq(usersTable.id, userId), isNull(usersTable.avatarUrl)));
+    await pool.query(
+      `UPDATE users SET avatar_url = $1 WHERE id = $2 AND avatar_url IS NULL`,
+      [avatarUrl, userId]
+    );
   }
 }
 
@@ -299,33 +296,35 @@ export async function createUserWithOauth({
   providerAccountId,
   avatarUrl,
 }) {
-  const user = await db.transaction(async (trx) => {
-    const [user] = await trx
-      .insert(usersTable)
-      .values({
-        email,
-        name,
-        // password: "",
-        avatarUrl,
-        isEmailValid: true, // we know that google's email are valid
-      })
-      .$returningId();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
-    await trx.insert(oauthAccountsTable).values({
-      provider,
-      providerAccountId,
-      userId: user.id,
-    });
+    const insertUser = await client.query(
+      `INSERT INTO users (email, name, avatar_url, is_email_valid) VALUES ($1, $2, $3, true) RETURNING id, name, email, is_email_valid`,
+      [email, name, avatarUrl]
+    );
+    const userRow = insertUser.rows[0];
+
+    await client.query(
+      `INSERT INTO oauth_accounts (provider, provider_account_id, user_id) VALUES ($1, $2, $3)`,
+      [provider, providerAccountId, userRow.id]
+    );
+
+    await client.query("COMMIT");
 
     return {
-      id: user.id,
+      id: userRow.id,
       name,
       email,
-      isEmailValid: true, // not necessary
+      isEmailValid: true,
       provider,
       providerAccountId,
     };
-  });
-
-  return user;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }

@@ -26,6 +26,7 @@ export const getShortenURL = async (req, res) => {
 
   const totalPage = Math.ceil(totalCounts/10);
   
+  
   res.render("index", {
     Links: shortLinks,
     totalCounts,
@@ -77,7 +78,7 @@ export const getShortCodeEdit = async (req, res) => {
   }
 
   try {
-    const [shortLink] = await getShortLinkById(id);
+    const shortLink = await getShortLinkById(id);
     if (!shortLink) return res.redirect("/404");
     res.render("editShortLink", {
       id: shortLink.id,
