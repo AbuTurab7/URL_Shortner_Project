@@ -1,0 +1,15 @@
+<nav class="navbar">
+  <div class="nav-container">
+    <a href="/" class="logo">URLShortner</a>
+    <ul class="nav-links">
+      <li><a href="/">Home</a></li>
+      <% if (user) { %>
+        <li><a href="/profile">Profile</a></li>
+        <li><a href="/logout" class="btn-logout">Logout</a></li>
+      <% } else { %>
+        <li><a href="/register" class="btn-register">Register</a></li>
+        <li><a href="/login" class="btn-login">Login</a></li>
+      <% } %>
+    </ul>
+  </div>
+</nav>
