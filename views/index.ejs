@@ -67,7 +67,7 @@
 
           <ul id="shortened_urls" class="links-list">
             <% Links.map(({shortCode, url , id}) => { %> <% const newURL =
-            url.length >= 40 ? url.slice(0, 40) + "..." : url; %>
+            url.length >= 40 ? url.slice(0, 20) + "..." : url; %>
             <li class="link-item">
               <a href="/<%= shortCode %>" target="_blank">
                 <%= host %>/<%= shortCode %>
